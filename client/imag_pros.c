@@ -11,6 +11,7 @@
 #include "imag_pros.h"
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
 #include <fcntl.h>
 
 /**************函数功能***************
@@ -44,6 +45,66 @@ void write_imag(char * picture, char * copy_pic_name, unsigned int picture_size)
     printf("write picture_data to bendi %d byte\n", total);
 #endif
     close(fd);
+}
+
+/**************函数功能***************
+ JPEG图像处理，并保存为bmp文件**
+ ************************************/
+void *frame_to_bmp(void * arg)
+{
+    sleep(2);
+    int ret;
+    unsigned char rgb24[1024 * 1024 *3];
+    unsigned int rgb24_width = 0;
+    unsigned int rgb24_height = 0;
+
+    while (1)
+    {
+#ifdef  DE_BUG
+        printf("pthread_frame lock!\n");
+#endif
+        /*线程上锁*/
+        if (pthread_mutex_lock(&mutex))
+        {
+            perror("pthread_mutex_lock");
+            break;
+        }
+        if (sem == 1)
+        {
+            //printf("start jpg convert to rgb24\n");
+            /*获得jpg转换后的rgb24图像数据*/
+            memset(rgb24, 0, sizeof(rgb24));
+            ret = jpeg_decompress(rgb24, "./pipa1.jpg", &rgb24_width, &rgb24_height);
+            if (-1 == ret)
+            {
+                printf("jpeg imag convert to rgb_24 failed\n");
+                printf("%s, %d, %s\n", __FUNCTION__, __LINE__, __FILE__);
+                exit(-1);
+            }
+            //printf("jpg convert to rgb24 success!\n");
+            sem = 0;
+
+            unsigned char bmp_[1024 * 1024 * 3];
+            memset(bmp_, 0, sizeof(bmp_));
+            /*将rgb24图像数据转换成bmp图像数据*/
+            rgb24_to_bmp(bmp_, rgb24, rgb24_width, rgb24_height);
+
+#ifdef  DE_BUG
+            printf("imag display success!\n");
+#endif
+        }
+        /*线程解锁*/
+        if (pthread_mutex_unlock(&mutex)) {
+            perror("pthread_mutex_unlock");
+            break;
+        }
+#ifdef  DE_BUG
+        printf("pthread_frame unlock!\n");
+#endif
+        usleep(20000);
+    }
+
+    pthread_exit(NULL);
 }
 
 /**************函数功能***************
@@ -149,7 +210,7 @@ void *frame_process(void * arg)
             //printf("jpg convert to rgb24 success!\n");
             sem = 0;
 
-            unsigned char bmp_[1024 * 1024 * 2];
+            unsigned char bmp_[1024 * 1024 * 3];
             memset(bmp_, 0, sizeof(bmp_));
             /*将rgb24图像数据转换成bmp图像数据*/
             rgb24_to_bmp(bmp_, rgb24, rgb24_width, rgb24_height);
@@ -200,12 +261,7 @@ void *frame_process(void * arg)
         perror("munmap");
         exit(-1);
     }
-    ret =  pthread_exit(NULL);
-    if (-1 == ret)
-    {
-        perror("pthread");
-        exit(-1);
-    }
+    pthread_exit(NULL);
 }
 
 /**************函数功能**************
@@ -328,12 +384,8 @@ void * imag_pross(void * arg)
         usleep(25000);
     }
 
-    ret =  pthread_exit(NULL);
-    if (-1 == ret)
-    {
-        perror("pthread");
-        exit(-1);
-    }
+    pthread_exit(NULL);
+    
     close(imag_fd);
 }
 

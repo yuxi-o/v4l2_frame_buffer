@@ -26,13 +26,15 @@
 #include <sys/mman.h>
 #include <linux/fb.h>
 #include <fcntl.h>
+#include <pthread.h>
 
 typedef struct sockaddr SA;
 typedef struct sockaddr_in SA_I;
 #define imag_collect_PORT_NUM 4096
 #define control_PORT_NUM 2001
 #define CONTROL_SERVER "192.168.1.1"
-#define IMAG_SERVER "10.202.3.183"
+//#define IMAG_SERVER "10.202.3.183"
+#define IMAG_SERVER "192.168.3.120"
 //#define DE_BUG 
 
 /*rgb32 数据结构声明*/
@@ -65,6 +67,7 @@ void write_imag(char * picture, char * copy_pic_name, unsigned int picture_size)
 void *imag_pross(void *arg);
 /*帧处理过程*/
 void *frame_process(void * arg);
+void *frame_to_bmp(void * arg);
 /*小车控制*/
 void car_control(void);
 /*yuv 转换为 rgb24*/

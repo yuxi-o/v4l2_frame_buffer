@@ -5,28 +5,32 @@
 #include "jpeg_decompress.h"
 #include "fb.h"
 
+//typedef unsigned char	BYTE;
+//typedef unsigned short	WORD;
+//typedef unsigned int	DWORD;
+
 #pragma pack(2)        //设置为2字节对齐
 struct bmp_fileheader
 {
     unsigned short    bfType;        
-    unsigned long    bfSize;
+    unsigned int    bfSize;
     unsigned short    bfReverved1;
     unsigned short    bfReverved2;
-    unsigned long    bfOffBits;
+    unsigned int    bfOffBits;
 };
 struct bmp_infoheader
 {
-    unsigned long    biSize;
-    unsigned long    biWidth;
-    unsigned long    biHeight;
+    unsigned int    biSize;
+    unsigned int    biWidth;
+    unsigned int    biHeight;
     unsigned short    biPlanes;
     unsigned short    biBitCount;
-    unsigned long    biCompression;
-    unsigned long    biSizeImage;
-    unsigned long    biXPelsPerMeter;
-    unsigned long    biYpelsPerMeter;
-    unsigned long    biClrUsed;
-    unsigned long    biClrImportant;
+    unsigned int    biCompression;
+    unsigned int    biSizeImage;
+    unsigned int    biXPelsPerMeter;
+    unsigned int    biYpelsPerMeter;
+    unsigned int    biClrUsed;
+    unsigned int    biClrImportant;
 };
 
 /*************************************************
@@ -88,7 +92,8 @@ Output: 将bmp图片存入到bmp为首地址的缓冲区
 Return: void
 Others: 
 *************************************************/
-
+static unsigned char BMP_COUNT = 0;
+static char BMP_NAME[64];
 void rgb24_to_bmp(unsigned char bmp[], unsigned char rgb24[],unsigned int width, unsigned int height)
 {
     struct bmp_fileheader bfh;
@@ -103,7 +108,8 @@ void rgb24_to_bmp(unsigned char bmp[], unsigned char rgb24[],unsigned int width,
     
     //填充bmp头信息   
     bfh.bfType=0x4D42;
-    bfh.bfSize=filesize;
+//    bfh.bfSize=54 + filesize;
+    bfh.bfSize= filesize;
     bfh.bfOffBits=headersize;
 
     bih.biSize=40;
@@ -125,7 +131,7 @@ void rgb24_to_bmp(unsigned char bmp[], unsigned char rgb24[],unsigned int width,
 
     point=rgb24+width*depth*(height-1);    //倒着写数据，bmp格式是倒的，jpg是正的
     unsigned int i, j;
-   for (i=0;i<height;i++)
+    for (i=0;i<height;i++)
     {
         for (j=0;j<width * depth;j += depth)
         {
@@ -136,6 +142,20 @@ void rgb24_to_bmp(unsigned char bmp[], unsigned char rgb24[],unsigned int width,
         point-=width*depth;
       
         memcpy(bmp + 54 + i * width * depth, line_buff, width * depth);//以行的方式将数据存入bmp buff中去
-   }
+    }
     free(line_buff);
+
+	FILE *fp;
+	sprintf(BMP_NAME, "%d.bmp", BMP_COUNT++);
+	fp = fopen(BMP_NAME, "wb");
+	if (!fp)
+	{
+		perror("fopen bmp file error");
+		return;
+	}
+
+	fwrite(bmp, 54+filesize, 1, fp);
+	printf("save %d BMP file OK, width:[%d], height:[%d], bmpSize:[%ld]\n", BMP_COUNT, width, height, 54+filesize);
+
+	fclose(fp);
 }

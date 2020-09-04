@@ -75,7 +75,7 @@ int main(int argc, char *argv[])
         perror("pthread_create");
         exit(-1);
     }
-    if (0 != pthread_create(&thread2, NULL, frame_process, NULL))
+    if (0 != pthread_create(&thread2, NULL, frame_to_bmp, NULL))
     {
         perror("pthread_create");
         exit(-1);

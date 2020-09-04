@@ -296,11 +296,6 @@ int camera_exit(int fd)
 
 }
 
-
-
-
-
-
 unsigned int size;
 static char  video_p[1024 * 128];
 int camera_fd;
@@ -446,14 +441,4 @@ int main(int argv,char ** argc)
 
     return 0;
 }
-
-
-
-
-
-
-
-
-
-
 
