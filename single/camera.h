@@ -1,6 +1,6 @@
 #ifndef __CAM_H__
 #define __CAM_H__
-#define DEBUG   1
+#define MDEBUG   1
 
 #define MAX_BACKLOG 32
 #define REQ_BUF_LEN 32
