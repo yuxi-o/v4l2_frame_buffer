@@ -12,6 +12,7 @@ struct img {
     unsigned int length;
 };
 
+
 int camera_init(char *devpath, unsigned int *width, unsigned int *height, unsigned int *size, unsigned int *ismjpeg);
 int camera_start(int fd);
 int camera_dqbuf(int fd, void **buf, unsigned int *size, unsigned int *index);
