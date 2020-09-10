@@ -6,7 +6,7 @@
 #define REQ_BUF_LEN 32
 #define HDR_BUF_LEN 20
 
-#define REQBUFS_COUNT  40 
+#define REQBUFS_COUNT  10 
 struct img {
     void * start;
     unsigned int length;

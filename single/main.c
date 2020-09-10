@@ -16,11 +16,14 @@
 #include <time.h>
 #include "camera.h"
 #include "image_process.h"
+#include "queue.h"
 
 #define PWIDTH	1280	
 #define PHEIGHT	720
 
 #define DEVNAME "/dev/video0"
+
+#define CONFIG_FRAME_SIZE	30
 
 pthread_mutex_t mutex;
 
@@ -32,16 +35,16 @@ static char gbmp_name[32];
 //static unsigned char video_p[PWIDTH * PHEIGHT *3];
 static unsigned char gframe_rgb24[PWIDTH * PHEIGHT *3];
 static unsigned char gframe_bmp[54 + PWIDTH * PHEIGHT *3];
+squeue_t gqueue;
+unsigned int ismjpeg = 1; // set mjpeg format
 
-void * new_thread(void *arg)
+void * get_frame_thread(void *arg)
 {
     char *dev_name=DEVNAME;
     unsigned int width = PWIDTH;
     unsigned int height = PHEIGHT;
-    unsigned int ismjpeg = 1; // set mjpeg format
+//    unsigned int ismjpeg = 1; // set mjpeg format
     unsigned int index;
-	time_t t1, t2;
-	int ret = 0;
 
     camera_fd=camera_init(dev_name, &width, &height, &gframe_size, &ismjpeg);
     if (-1 == camera_fd)
@@ -55,30 +58,59 @@ void * new_thread(void *arg)
     printf("camera_fd = %d\n", camera_fd);
     camera_start(camera_fd);
 
+    while(1)
+    {
+        unsigned char *jpegbuf = NULL;
+        unsigned int jpegsize = 0;
+
+		if(squeue_is_full(&gqueue))
+		{
+			printf("Warn: frame buffer queue is overflow!\n");
+			usleep(10000);
+			continue;
+		}
+
+        /*把图像数据存放到用户缓存空间*/
+        camera_dqbuf(camera_fd,(void **)&jpegbuf,&jpegsize,&index);
+        pthread_mutex_lock(&mutex);
+//        gframe_size = jpegsize;
+//       memcpy(video_p, jpegbuf, jpegsize);
+		squeue_enqueue_ext(&gqueue, jpegbuf, jpegsize);
+        camera_eqbuf(camera_fd,index);
+    }
+}
+
+void * process_frame_thread(void *arg)
+{
+    unsigned int width = PWIDTH;
+    unsigned int height = PHEIGHT;
+	time_t t1, t2;
+	int ret = 0;
+
 	t1 = time(NULL);	
     while(1)
     {
         unsigned char *jpegbuf = NULL;
         unsigned int jpegsize = 0;
 		unsigned int bmpsize = 0;
+		squeue_data_t sdata;
 
-        /*把图像数据存放到用户缓存空间*/
-        camera_dqbuf(camera_fd,(void **)&jpegbuf,&jpegsize,&index);
-//        pthread_mutex_lock(&mutex);
-//        gframe_size = jpegsize;
-//        memcpy(video_p, jpegbuf, jpegsize);
+		if(squeue_is_empty(&gqueue))
+		{
+			printf("Warn: frame buffer queue is empty!\n");
+			usleep(10000);
+			continue;
+		}
+
+        pthread_mutex_lock(&mutex);
+		squeue_dequeue(&gqueue, &sdata);
+        pthread_mutex_unlock(&mutex);
+
+		jpegbuf = sdata.pdata;
+		jpegsize = sdata.length;
 		if (ismjpeg)
 		{
-/*
-//			write_fd("./new.jpg", jpegbuf, jpegsize);	
-//			ret = jpeg_file_to_rgb24(gframe_rgb24, "./new.jpg", &width, &height); 
-			if (-1 == ret)
-			{
-				printf("jpeg image convert to rgb24 failed!\n");
-				printf("%s, %d, %s\n", __FUNCTION__, __LINE__, __FILE__);
-				exit(-1);
-			}
-*/
+
 			jpeg_to_rgb24(gframe_rgb24, jpegbuf, &width, &height, jpegsize);
 		}
 		else 
@@ -94,20 +126,17 @@ void * new_thread(void *arg)
 			printf("%s, %d, %s\n", __FUNCTION__, __LINE__, __FILE__);
 			exit(-1);
 		}
-//        pthread_mutex_unlock(&mutex);
-        //usleep(10000);
-
 
 #if 1 
 		gframe_count++;
 		if (gframe_count > 100 ){
 			t2 = time(NULL);	
-			printf("camera data (mjpeg: %d) is %d bytes, index is %d, width is %d, height is %d\n", ismjpeg, jpegsize, index, width, height);
+//			printf("camera data (mjpeg: %d) is %d bytes, index is %d, width is %d, height is %d\n", ismjpeg, jpegsize, index, width, height);
 			printf("100 frame (%u) diff timestamp: %ld\n", gframe_count, t2-t1);
 			gframe_count=0;
 		}
 #endif
-        camera_eqbuf(camera_fd,index);
+		squeue_data_destroy((void *)&sdata);
     }
 }
 
@@ -116,14 +145,23 @@ int main(int argv,char ** argc)
 	int ret = 0;
 
     signal(SIGPIPE, SIG_IGN);
-    pthread_t video_thread = 0;
-    pthread_create(&video_thread,NULL,new_thread, NULL);
+	ret = squeue_init(&gqueue, CONFIG_FRAME_SIZE);
+	if (0 > ret)
+	{
+		perror("init queue failed!\n");
+		exit(-1);
+	}
 
+    pthread_t get_frame_td = 0;
+    pthread_t process_frame_td = 0;
+    pthread_create(&get_frame_td, NULL, get_frame_thread, NULL);
+    pthread_create(&process_frame_td, NULL, process_frame_thread, NULL);
     if (0 > pthread_mutex_init(&mutex, NULL))
     {
         perror("pthread_mutex_init");
         exit(-1);
     }
+
 #if 0
     sleep(2);
     int sockfd=socket(AF_INET,SOCK_STREAM,0);
@@ -214,16 +252,26 @@ int main(int argv,char ** argc)
     close(sockfd);
 #endif
 	void *retval = NULL;
-	if (0 != pthread_join(video_thread, &retval))
+	if (0 != pthread_join(get_frame_td, &retval))
 	{
-		printf("video thread exit fault!\n");
+		printf("get_frame_thread exit fault!\n");
 //		exit(EXIT_FAILURE);
 		ret = -1;
 	} else {
-		printf("video thread exit with value %s\n", (char *)retval);
+		printf("get_frame_thread exit with value %s\n", (char *)retval);
+		free(retval);
+	}
+	if (0 != pthread_join(process_frame_td, &retval))
+	{
+		printf("process_frame_thread exit fault!\n");
+//		exit(EXIT_FAILURE);
+		ret = -1;
+	} else {
+		printf("process_frame_thread exit with value %s\n", (char *)retval);
 		free(retval);
 	}
 
+	squeue_destroy(&gqueue, squeue_data_destroy);
     camera_stop(camera_fd);
     camera_exit(camera_fd);
 
