@@ -25,13 +25,17 @@
 
 #define CONFIG_FRAME_SIZE	30
 
+typedef enum {
+	CAMERA_STATE_CLOSE,
+	CAMERA_STATE_CAP,
+	CAMERA_STATE_ERR
+} camera_state_t;
+
 pthread_mutex_t mutex;
 
 int gcamera_fd;
+camera_state_t gcamera_state = CAMERA_STATE_CLOSE;
 squeue_t gqueue;
-char gbmp_name[32];
-//static char  video_p[1024 * 128];
-//static unsigned char video_p[PWIDTH * PHEIGHT *3];
 unsigned char gframe_rgb24[PWIDTH * PHEIGHT *3];
 unsigned char gframe_bmp[54 + PWIDTH * PHEIGHT *3];
 unsigned int gis_mjpeg = 1; // set mjpeg format
@@ -41,34 +45,24 @@ unsigned int gframe_size = 0;
 unsigned int gframe_count = 0;
 unsigned int gindex = 0;
 
-void * get_frame_thread(void *arg)
+void* get_frame_thread(void *arg)
 {
 	int ret = -1;
-    char *dev_name=DEVNAME;
-
-    gcamera_fd=camera_init(dev_name, &gwidth, &gheight, &gframe_size, &gis_mjpeg);
-    if (-1 == gcamera_fd)
-    {
-        printf("%s, %d, %s\n", __FUNCTION__, __LINE__, __FILE__);
-        printf("camera init is failed!\n");
-        exit(-1);
-    }
+	unsigned char *buf = NULL;
+	unsigned int size = 0;
 
     /*开始捕获图像数据*/
-    printf("camera_fd = %d\n", gcamera_fd);
     ret = camera_start(gcamera_fd);
 	if (ret < 0)
 	{
         printf("%s, %d, %s\n", __FUNCTION__, __LINE__, __FILE__);
-        printf("camera init is failed!\n");
+        printf("camera start failed!\n");
         exit(-1);
 	}
+	gcamera_state = CAMERA_STATE_CAP;
 
     while(1)
     {
-        unsigned char *buf = NULL;
-        unsigned int size = 0;
-
 		if(squeue_is_full(&gqueue))
 		{
 			printf("Warn: frame buffer queue is overflow!\n");
@@ -77,27 +71,42 @@ void * get_frame_thread(void *arg)
 		}
 
         /*把图像数据存放到用户缓存空间*/
-        camera_dqbuf(gcamera_fd,(void **)&buf, &size, &gindex);
-        pthread_mutex_lock(&mutex);
-//        gframe_size = jpegsize;
-//       memcpy(video_p, jpegbuf, jpegsize);
-		squeue_enqueue_ext(&gqueue, buf, size);
-        pthread_mutex_unlock(&mutex);
+        ret = camera_dqbuf(gcamera_fd,(void **)&buf, &size, &gindex);
+		if (ret < 0)
+		{
+			perror("Camera dequeue fail");
+			break;
+		}
+//      pthread_mutex_lock(&mutex);
+//      gframe_size = jpegsize;
+//      memcpy(video_p, jpegbuf, jpegsize);
+		ret = squeue_enqueue_ext(&gqueue, buf, size);
+		if (ret < 0)
+		{
+			perror("Camera dequeue fail");
+			break;
+		}
+//        pthread_mutex_unlock(&mutex);
         camera_eqbuf(gcamera_fd, gindex);
     }
+
+	gcamera_state = CAMERA_STATE_ERR;
+	printf("Camera get frame thread stop!\n");
+	return NULL;
 }
 
 void * process_frame_thread(void *arg)
 {
+	char gbmp_name[32];
+	squeue_data_t sdata;
+	time_t t1, t2;
     unsigned int width = PWIDTH;
     unsigned int height = PHEIGHT;
 	unsigned int bmpsize = 0;
-	squeue_data_t sdata;
-	time_t t1, t2;
 	int ret = 0;
 
 	t1 = time(NULL);	
-    while(1)
+    while(CAMERA_STATE_CAP == gcamera_state)
     {
 		if(squeue_is_empty(&gqueue))
 		{
@@ -106,9 +115,9 @@ void * process_frame_thread(void *arg)
 			continue;
 		}
 
-        pthread_mutex_lock(&mutex);
+//        pthread_mutex_lock(&mutex);
 		squeue_dequeue(&gqueue, &sdata);
-        pthread_mutex_unlock(&mutex);
+//        pthread_mutex_unlock(&mutex);
 
 		if (gis_mjpeg)
 		{
@@ -128,6 +137,7 @@ void * process_frame_thread(void *arg)
 			exit(-1);
 		}
 
+// 统计帧处理速度
 #if 1 
 		gframe_count++;
 		if (gframe_count > 100 ){
@@ -139,13 +149,40 @@ void * process_frame_thread(void *arg)
 #endif
 		squeue_data_destroy((void *)&sdata);
     }
+
+	gcamera_state = CAMERA_STATE_ERR;
+	printf("Camera process frame thread stop!\n");
+	return NULL;
+}
+
+void signal_int_handle(int signo)
+{
+	printf("Clean resource and exit!\n");
+
+	squeue_destroy(&gqueue, squeue_data_destroy);
+    camera_stop(gcamera_fd);
+    camera_exit(gcamera_fd);
 }
 
 int main(int argv,char ** argc)
 {
 	int ret = 0;
+    char *dev_name=DEVNAME;
+    pthread_t get_frame_td = 0;
+    pthread_t process_frame_td = 0;
 
-    signal(SIGPIPE, SIG_IGN);
+	signal(SIGINT, signal_int_handle);
+	
+	// 初始化camera
+    gcamera_fd = camera_init(dev_name, &gwidth, &gheight, &gframe_size, &gis_mjpeg);
+    if (gcamera_fd < 0)
+    {
+        printf("%s, %d, %s\n", __FUNCTION__, __LINE__, __FILE__);
+        printf("camera init is failed!\n");
+        exit(-1);
+    }
+
+	// 初始化队列
 	ret = squeue_init(&gqueue, CONFIG_FRAME_SIZE);
 	if (0 > ret)
 	{
@@ -153,129 +190,37 @@ int main(int argv,char ** argc)
 		exit(-1);
 	}
 
-    pthread_t get_frame_td = 0;
-    pthread_t process_frame_td = 0;
-    pthread_create(&get_frame_td, NULL, get_frame_thread, NULL);
-    pthread_create(&process_frame_td, NULL, process_frame_thread, NULL);
-    if (0 > pthread_mutex_init(&mutex, NULL))
+	// 开启线程
+	if (0 > pthread_mutex_init(&mutex, NULL))
     {
         perror("pthread_mutex_init");
         exit(-1);
     }
-
-#if 0
-    sleep(2);
-    int sockfd=socket(AF_INET,SOCK_STREAM,0);
-    struct sockaddr_in serveraddr;
-    memset(&serveraddr,0,sizeof(serveraddr));
-    serveraddr.sin_port=htons(4096);
-    serveraddr.sin_addr.s_addr=htonl(INADDR_ANY);
-    serveraddr.sin_family=AF_INET;
-    int opt = 0;
-    int ret = setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-    if(ret < 0)
-        perror("set sock option error");
-
-    ret=bind(sockfd,(struct sockaddr *)&serveraddr,sizeof(serveraddr));
-    if(ret<0)
-    {
-        perror("bind failed");
-        return -1;
-    }
-
-    ret=listen(sockfd,5);
-    if(ret<0)
-    {
-        perror("listen failed");
-        return -1;
-    }
-
-
-    struct sockaddr_in client_address;
-    socklen_t client_socket_lenth = sizeof(struct sockaddr_in);
-    while(1)
-    {
-        int client_fd=accept(sockfd,(struct sockaddr*)&client_address,&client_socket_lenth);
-        char* client_ip_address=inet_ntoa(client_address.sin_addr);
-        short client_port=ntohs(client_address.sin_port);
-        printf("%s \n  %d\n",client_ip_address,client_port);
-
-        while(1)
-        {
-            char client_buf[256]={0};
-            int recvbytes;
-            /*接受客户端的图像数据获取请求*/
-            recvbytes=recv(client_fd,client_buf,sizeof(client_buf),0);
-            if(recvbytes==0)
-            {
-                printf("client exit");
-                break;
-            }else if(recvbytes<0){
-                perror("recv failed");
-                close(client_fd);
-                break;
-            }
-            if(strcmp(client_buf,"request video")==0)
-            {
-                printf("client request video\n");
-                /*
-                   FILE * fp = fopen("t.jpg", "w+");
-                   fwrite(video_p, gframe_size, 1, fp);
-                   fclose(fp);
-                 */
-                char size_buf[10] = {0};
-                pthread_mutex_lock(&mutex);
-                sprintf(size_buf,"%d",gframe_size);
-                printf("%s\n",size_buf);
-                unsigned int send_ret=0;
-                /*发送图像数据的大小给客户端*/
-                int ret = send(client_fd,size_buf,sizeof(size_buf),0);
-                if(ret < 0)
-                {
-                    perror("send picture to server failed");
-                    pthread_mutex_unlock(&mutex);
-                    break;
-                }
-                /*发送图像数据给客户端*/
-                ret = send_ret = send(client_fd,video_p, gframe_size, 0);
-                if(ret < 0)
-                {
-                    perror("send picture to server failed");
-                    pthread_mutex_unlock(&mutex);
-                    break;
-                }
-                printf("send %d bytes\n", send_ret);
-                pthread_mutex_unlock(&mutex);
-            }
-        }
-        close(client_fd);
-    }
-    close(sockfd);
-#endif
+    if ((0 != pthread_create(&get_frame_td, NULL, get_frame_thread, NULL))
+	    || (0 != pthread_create(&process_frame_td, NULL, process_frame_thread, NULL)))
+	{
+		perror("pthread_create");
+		exit(-1);
+	}
+    
+	// 等待线程退出
 	void *retval = NULL;
 	if (0 != pthread_join(get_frame_td, &retval))
 	{
 		printf("get_frame_thread exit fault!\n");
-//		exit(EXIT_FAILURE);
-		ret = -1;
+		exit(-1);
 	} else {
 		printf("get_frame_thread exit with value %s\n", (char *)retval);
-		free(retval);
 	}
 	if (0 != pthread_join(process_frame_td, &retval))
 	{
 		printf("process_frame_thread exit fault!\n");
-//		exit(EXIT_FAILURE);
-		ret = -1;
+		exit(-1);
 	} else {
 		printf("process_frame_thread exit with value %s\n", (char *)retval);
-		free(retval);
 	}
 
-	squeue_destroy(&gqueue, squeue_data_destroy);
-    camera_stop(gcamera_fd);
-    camera_exit(gcamera_fd);
-
-    return ret;
+	signal_int_handle(0);
+    return 0;
 }
 

@@ -16,8 +16,16 @@
 #include <time.h>
 #include "camera.h"
 
-struct v4l2_requestbuffers reqbufs;
+#define REQBUFS_COUNT  10 
+#define CONFIG_CAPTURE_FPS 30
+
+struct img {
+    void * start;
+    unsigned int length;
+};
+
 struct img bufs[REQBUFS_COUNT];
+struct v4l2_requestbuffers reqbufs;
 
 int camera_init(char *devpath, unsigned int *width, unsigned int *height, unsigned int *size, unsigned int *ismjpeg)
 {
@@ -29,16 +37,14 @@ int camera_init(char *devpath, unsigned int *width, unsigned int *height, unsign
 
     fd = open(devpath, O_RDWR);
     if (fd == -1) {
-        perror("camera->init");
-        printf("%s, %d, %s\n", __FUNCTION__, __LINE__, __FILE__);
+		printf("camera->init: Open %s failed.\n", devpath);
         return -1;
     }
 
     /*查询设备属性*/
     ret = ioctl(fd, VIDIOC_QUERYCAP, &capability);
     if (ret == -1) {
-        printf("%s, %d, %s\n", __FUNCTION__, __LINE__, __FILE__);
-        perror("camera->init");
+        printf("camera->init: querycap failed.\n");
         return -1;
     }
 
@@ -50,15 +56,13 @@ int camera_init(char *devpath, unsigned int *width, unsigned int *height, unsign
 	printf("device_caps:\t%x\n", capability.device_caps);
 
     if(!(capability.capabilities & V4L2_CAP_VIDEO_CAPTURE)) {
-        fprintf(stderr, "camera->init: device can not support V4L2_CAP_VIDEO_CAPTURE\n");
-        printf("%s, %d, %s\n", __FUNCTION__, __LINE__, __FILE__);
+        printf("camera->init: camera can not support V4L2_CAP_VIDEO_CAPTURE\n");
         close(fd);
         return -1;
     }
 
     if(!(capability.capabilities & V4L2_CAP_STREAMING)) {
-        fprintf(stderr, "camera->init: device can not support V4L2_CAP_STREAMING\n");
-        printf("%s, %d, %s\n", __FUNCTION__, __LINE__, __FILE__);
+        printf("camera->init: camera can not support V4L2_CAP_STREAMING\n");
         close(fd);
         return -1;
     }
@@ -68,7 +72,6 @@ int camera_init(char *devpath, unsigned int *width, unsigned int *height, unsign
     memset(&fmt1, 0, sizeof(fmt1));
     fmt1.index = 0;            //初始化为0
     fmt1.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    //获取支持的格式
     while ((ret = ioctl(fd, VIDIOC_ENUM_FMT, &fmt1)) == 0)
     {
         fmt1.index++;
@@ -76,6 +79,56 @@ int camera_init(char *devpath, unsigned int *width, unsigned int *height, unsign
 			fmt1.pixelformat & 0xFF, (fmt1.pixelformat >> 8) & 0xFF, (fmt1.pixelformat >> 16) & 0xFF, 
 			(fmt1.pixelformat >> 24) & 0xFF, fmt1.description);
     }
+
+	struct v4l2_streamparm streamparam;
+	/* 获取视频流信息 */
+	memset(&streamparam, 0, sizeof(struct v4l2_streamparm));
+	streamparam.type = V4L2_BUF_TYPE_VIDEO_CAPTURE; 
+	ret = ioctl(fd, VIDIOC_G_PARM, &streamparam);
+	if(ret) {
+		perror("camera->init: Get stream info failed");
+        close(fd);
+        return -1;
+	}
+
+	printf("Before setting stream params:\n");
+	printf("Capability: %u\n", streamparam.parm.capture.capability);
+	printf("Capturemode: %u\n", streamparam.parm.capture.capturemode);
+	printf("Extendedmode: %u\n", streamparam.parm.capture.extendedmode);
+	printf("Timeperframe denominator: %u\n", streamparam.parm.capture.timeperframe.denominator);
+	printf("Timeperframe numerator: %u\n", streamparam.parm.capture.timeperframe.numerator);
+
+	/* 帧率分母 分子设置 */
+	streamparam.parm.capture.timeperframe.denominator = CONFIG_CAPTURE_FPS;
+	streamparam.parm.capture.timeperframe.numerator = 1;
+
+	if(ioctl(fd, VIDIOC_S_PARM, &streamparam) == -1) {
+		perror("camera->init: set fps failed");
+        close(fd);
+        return -1;
+	}
+
+	/* 获取视频流信息 */
+	streamparam.type = V4L2_BUF_TYPE_VIDEO_CAPTURE; 
+	ret = ioctl(fd, VIDIOC_G_PARM, &streamparam);
+	if(ret) {
+		perror("camera->init: Get stream info failed");
+        close(fd);
+        return -1;
+	}
+	printf("After setting stream params:\n");
+	printf("Capability: %u\n", streamparam.parm.capture.capability);
+	printf("Capturemode: %u\n", streamparam.parm.capture.capturemode);
+	printf("Extendedmode: %u\n", streamparam.parm.capture.extendedmode);
+	printf("Timeperframe denominator: %u\n", streamparam.parm.capture.timeperframe.denominator);
+	printf("Timeperframe numerator: %u\n", streamparam.parm.capture.timeperframe.numerator);
+	/* 设置自动曝光 */
+	struct v4l2_control ctrl;
+	ctrl.id = V4L2_CID_EXPOSURE_ABSOLUTE;
+	ret = ioctl(fd, VIDIOC_G_CTRL, &ctrl);
+	if(ret) {
+		printf("camera->init: set exposure failed!\n");
+	}
 
     //设定摄像头捕获格式
 	if (ismjpeg)
@@ -89,12 +142,10 @@ int camera_init(char *devpath, unsigned int *width, unsigned int *height, unsign
 		ret = ioctl(fd, VIDIOC_S_FMT, &format);
 		if(ret == -1)
 		{
-			printf("%s, %d, %s\n", __FUNCTION__, __LINE__, __FILE__);
-			perror("camera_init");
+			printf("camera->init: set V4L2_PIX_FMT_MJPEG failed!\n");
 		}
 		else {
-			fprintf(stdout, "camera->init: picture format is mjpeg\n");
-			printf("%s, %d, %s\n", __FUNCTION__, __LINE__, __FILE__);
+			printf("camera->init: picture format is mjpeg\n");
 			*ismjpeg = 1;
 			goto get_fmt;
 		}
@@ -108,21 +159,18 @@ int camera_init(char *devpath, unsigned int *width, unsigned int *height, unsign
     format.fmt.pix.field = V4L2_FIELD_ANY;
     ret = ioctl(fd, VIDIOC_S_FMT, &format);
     if(ret == -1) {
-        perror("camera init");
-        printf("%s, %d, %s\n", __FUNCTION__, __LINE__, __FILE__);
+		printf("camera->init: set V4L2_PIX_FMT_YUYV failed!\n");
         return -1;
     } else {
         *ismjpeg = 0;
-        fprintf(stdout, "camera->init: picture format is yuyv\n");
-        printf("%s, %d, %s\n", __FUNCTION__, __LINE__, __FILE__);
+		printf("camera->init: picture format is yuyu.\n");
     }
 
     /*查看当前视频设置的捕获模式*/
 get_fmt:
     ret = ioctl(fd, VIDIOC_G_FMT, &format);
     if (ret == -1) {
-        perror("camera init");
-        printf("%s, %d, %s\n", __FUNCTION__, __LINE__, __FILE__);
+		printf("camera->init: get format failed!\n");
         return -1;
     }
 	printf("Format type: %d\n", format.type);
@@ -134,12 +182,12 @@ get_fmt:
 
     if (format.fmt.pix.pixelformat == V4L2_PIX_FMT_MJPEG)
     {
-        fprintf(stdout, "camera->init: picture format is mjpeg\n");
+		printf("camera->init: picture format is mjpeg\n");
     }
 
     if (format.fmt.pix.pixelformat == V4L2_PIX_FMT_YUYV)
     {
-        fprintf(stdout, "camera->init: picture format is yuyv\n");
+		printf("camera->init: picture format is yuyu.\n");
     }
 
     /*给图像数据分配存在于内核的物理内存空间*/
@@ -149,8 +197,7 @@ get_fmt:
     reqbufs.memory  = V4L2_MEMORY_MMAP;
     ret = ioctl(fd, VIDIOC_REQBUFS, &reqbufs);
     if (ret == -1) {
-        perror("camera init");
-        printf("%s, %d, %s\n", __FUNCTION__, __LINE__, __FILE__);
+		printf("camera->init: reqbufs failed!\n");
         close(fd);
         return -1;
     }
@@ -166,8 +213,7 @@ get_fmt:
         vbuf.index = i;
         ret = ioctl(fd, VIDIOC_QUERYBUF, &vbuf);
         if (ret == -1) {
-            perror("camera init");
-            printf("%s, %d, %s\n", __FUNCTION__, __LINE__, __FILE__);
+			printf("camera->init: querybuf failed!\n");
             close(fd);
             return -1;
         }
@@ -177,8 +223,7 @@ get_fmt:
         bufs[i].start = mmap(NULL, vbuf.length, PROT_READ | PROT_WRITE, MAP_SHARED, fd, vbuf.m.offset);
         if (bufs[i].start == MAP_FAILED)
         {
-            perror("camera init");
-            printf("%s, %d, %s\n", __FUNCTION__, __LINE__, __FILE__);
+			printf("camera->init: mmap failed!\n");
             close(fd);
             return -1;
         }
@@ -188,8 +233,7 @@ get_fmt:
         vbuf.memory = V4L2_MEMORY_MMAP;
         ret = ioctl(fd, VIDIOC_QBUF, &vbuf);
         if (ret == -1) {
-            perror("camera init");
-            printf("%s, %d, %s\n", __FUNCTION__, __LINE__, __FILE__);
+			printf("camera->init: qbuf failed!\n");
             close(fd);
             return -1;
         }
@@ -209,13 +253,14 @@ int camera_start(int fd)
 
     ret = ioctl(fd, VIDIOC_STREAMON, &type);
     if (ret == -1) {
-        perror("camera->start");
+        printf("camera->start: streamon error!\n");
         return -1;
     }
-    fprintf(stdout, "camera->start: start capture\n");
+    printf("camera->start: start capture\n");
 
     return 0;
 }
+
 // 从队列中取出帧 
 int camera_dqbuf(int fd, void **buf, unsigned int *size, unsigned int *index)
 {
@@ -232,20 +277,20 @@ int camera_dqbuf(int fd, void **buf, unsigned int *size, unsigned int *index)
         timeout.tv_usec = 0;
         ret = select(fd + 1, &fds, NULL, NULL, &timeout);
         if (ret == -1) {
-            perror("camera->dqbuf");
+            printf("camera->dqbuf: select error!\n");
             if (errno == EINTR)
                 continue;
             else
                 return -1;
         } else if (ret == 0) {
-            fprintf(stderr, "camera->dqbuf: dequeue buffer timeout\n");
+            printf("camera->dqbuf: dequeue buffer timeout\n");
             continue;
         } else {
             vbuf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
             vbuf.memory = V4L2_MEMORY_MMAP;
             ret = ioctl(fd, VIDIOC_DQBUF, &vbuf);
             if (ret == -1) {
-                perror("camera->dqbuf");
+                printf("camera->dqbuf:dqbuf error!\n");
                 return -1;
             }
             *buf = bufs[vbuf.index].start;
@@ -268,7 +313,7 @@ int camera_eqbuf(int fd, unsigned int index)
     vbuf.index = index;
     ret = ioctl(fd, VIDIOC_QBUF, &vbuf);
     if (ret == -1) {
-        perror("camera->eqbuf");
+        printf("camera->eqbuf: qbuf error!\n");
         return -1;
     }
 
@@ -282,10 +327,10 @@ int camera_stop(int fd)
 
     ret = ioctl(fd, VIDIOC_STREAMOFF, &type);
     if (ret == -1) {
-        perror("camera->stop");
+        printf("camera->stop: streamoff error!\n");
         return -1;
     }
-    fprintf(stdout, "camera->stop: stop capture\n");
+    printf("camera->stop: stop capture\n");
 
     return 0;
 }
@@ -308,7 +353,7 @@ int camera_exit(int fd)
     for (i = 0; i < reqbufs.count; i++)
         munmap(bufs[i].start, bufs[i].length);
 
-    fprintf(stdout, "camera->exit: camera exit\n");
+    printf("camera->exit: camera exit\n");
 
     return close(fd);
 
