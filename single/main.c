@@ -27,27 +27,27 @@
 
 pthread_mutex_t mutex;
 
-int camera_fd;
-unsigned int gframe_size;
-unsigned int gframe_count = 0;
-static char gbmp_name[32];
+int gcamera_fd;
+squeue_t gqueue;
+char gbmp_name[32];
 //static char  video_p[1024 * 128];
 //static unsigned char video_p[PWIDTH * PHEIGHT *3];
-static unsigned char gframe_rgb24[PWIDTH * PHEIGHT *3];
-static unsigned char gframe_bmp[54 + PWIDTH * PHEIGHT *3];
-squeue_t gqueue;
-unsigned int ismjpeg = 1; // set mjpeg format
+unsigned char gframe_rgb24[PWIDTH * PHEIGHT *3];
+unsigned char gframe_bmp[54 + PWIDTH * PHEIGHT *3];
+unsigned int gis_mjpeg = 1; // set mjpeg format
+unsigned int gwidth = PWIDTH;
+unsigned int gheight = PHEIGHT;
+unsigned int gframe_size = 0;
+unsigned int gframe_count = 0;
+unsigned int gindex = 0;
 
 void * get_frame_thread(void *arg)
 {
+	int ret = -1;
     char *dev_name=DEVNAME;
-    unsigned int width = PWIDTH;
-    unsigned int height = PHEIGHT;
-//    unsigned int ismjpeg = 1; // set mjpeg format
-    unsigned int index;
 
-    camera_fd=camera_init(dev_name, &width, &height, &gframe_size, &ismjpeg);
-    if (-1 == camera_fd)
+    gcamera_fd=camera_init(dev_name, &gwidth, &gheight, &gframe_size, &gis_mjpeg);
+    if (-1 == gcamera_fd)
     {
         printf("%s, %d, %s\n", __FUNCTION__, __LINE__, __FILE__);
         printf("camera init is failed!\n");
@@ -55,13 +55,19 @@ void * get_frame_thread(void *arg)
     }
 
     /*开始捕获图像数据*/
-    printf("camera_fd = %d\n", camera_fd);
-    camera_start(camera_fd);
+    printf("camera_fd = %d\n", gcamera_fd);
+    ret = camera_start(gcamera_fd);
+	if (ret < 0)
+	{
+        printf("%s, %d, %s\n", __FUNCTION__, __LINE__, __FILE__);
+        printf("camera init is failed!\n");
+        exit(-1);
+	}
 
     while(1)
     {
-        unsigned char *jpegbuf = NULL;
-        unsigned int jpegsize = 0;
+        unsigned char *buf = NULL;
+        unsigned int size = 0;
 
 		if(squeue_is_full(&gqueue))
 		{
@@ -71,12 +77,13 @@ void * get_frame_thread(void *arg)
 		}
 
         /*把图像数据存放到用户缓存空间*/
-        camera_dqbuf(camera_fd,(void **)&jpegbuf,&jpegsize,&index);
+        camera_dqbuf(gcamera_fd,(void **)&buf, &size, &gindex);
         pthread_mutex_lock(&mutex);
 //        gframe_size = jpegsize;
 //       memcpy(video_p, jpegbuf, jpegsize);
-		squeue_enqueue_ext(&gqueue, jpegbuf, jpegsize);
-        camera_eqbuf(camera_fd,index);
+		squeue_enqueue_ext(&gqueue, buf, size);
+        pthread_mutex_unlock(&mutex);
+        camera_eqbuf(gcamera_fd, gindex);
     }
 }
 
@@ -84,17 +91,14 @@ void * process_frame_thread(void *arg)
 {
     unsigned int width = PWIDTH;
     unsigned int height = PHEIGHT;
+	unsigned int bmpsize = 0;
+	squeue_data_t sdata;
 	time_t t1, t2;
 	int ret = 0;
 
 	t1 = time(NULL);	
     while(1)
     {
-        unsigned char *jpegbuf = NULL;
-        unsigned int jpegsize = 0;
-		unsigned int bmpsize = 0;
-		squeue_data_t sdata;
-
 		if(squeue_is_empty(&gqueue))
 		{
 			printf("Warn: frame buffer queue is empty!\n");
@@ -106,18 +110,15 @@ void * process_frame_thread(void *arg)
 		squeue_dequeue(&gqueue, &sdata);
         pthread_mutex_unlock(&mutex);
 
-		jpegbuf = sdata.pdata;
-		jpegsize = sdata.length;
-		if (ismjpeg)
+		if (gis_mjpeg)
 		{
-
-			jpeg_to_rgb24(gframe_rgb24, jpegbuf, &width, &height, jpegsize);
+			jpeg_to_rgb24(gframe_rgb24, sdata.pdata, &width, &height, sdata.length);
 		}
 		else 
 		{
-			yuv422_to_rgb24(gframe_rgb24, jpegbuf, width, height);
+			yuv422_to_rgb24(gframe_rgb24, sdata.pdata, width, height);
 		}
-		rgb24_to_bmp(gframe_bmp, gframe_rgb24, width, height, ismjpeg, &bmpsize);
+		rgb24_to_bmp(gframe_bmp, gframe_rgb24, width, height, gis_mjpeg, &bmpsize);
 		sprintf(gbmp_name, "%d.bmp", gframe_count);
 		ret = write_file(gbmp_name, gframe_bmp, bmpsize);
 		if (ret < 0)
@@ -131,7 +132,7 @@ void * process_frame_thread(void *arg)
 		gframe_count++;
 		if (gframe_count > 100 ){
 			t2 = time(NULL);	
-//			printf("camera data (mjpeg: %d) is %d bytes, index is %d, width is %d, height is %d\n", ismjpeg, jpegsize, index, width, height);
+			printf("camera data (mjpeg: %d) is %d bytes, width is %d, height is %d\n", gis_mjpeg, sdata.length, width, height);
 			printf("100 frame (%u) diff timestamp: %ld\n", gframe_count, t2-t1);
 			gframe_count=0;
 		}
@@ -272,8 +273,8 @@ int main(int argv,char ** argc)
 	}
 
 	squeue_destroy(&gqueue, squeue_data_destroy);
-    camera_stop(camera_fd);
-    camera_exit(camera_fd);
+    camera_stop(gcamera_fd);
+    camera_exit(gcamera_fd);
 
     return ret;
 }

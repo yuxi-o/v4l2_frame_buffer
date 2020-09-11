@@ -56,7 +56,7 @@ int squeue_enqueue_ext(squeue_t *pqueue, void *pdata, unsigned int length)
 		_qprintf("Warn: malloc error");
 		return -1;
 	}
-	memcpy(data.pdata, pdata, sizeof(squeue_data_t));
+	memcpy(data.pdata, pdata, sizeof(length));
 
 	pthread_mutex_lock(&pqueue->mutex);
 	if(pqueue->count < pqueue->size)
