@@ -80,6 +80,7 @@ int camera_init(char *devpath, unsigned int *width, unsigned int *height, unsign
 			(fmt1.pixelformat >> 24) & 0xFF, fmt1.description);
     }
 
+#if 0
 	struct v4l2_streamparm streamparam;
 	/* 获取视频流信息 */
 	memset(&streamparam, 0, sizeof(struct v4l2_streamparm));
@@ -129,9 +130,10 @@ int camera_init(char *devpath, unsigned int *width, unsigned int *height, unsign
 	if(ret) {
 		printf("camera->init: set exposure failed!\n");
 	}
+#endif
 
     //设定摄像头捕获格式
-	if (ismjpeg)
+	if (*ismjpeg)
 	{
 		memset(&format, 0, sizeof(format));
 		format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;

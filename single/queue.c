@@ -12,6 +12,15 @@
 #define _qprintf(fmt, args...) 
 #endif
 
+/**
+ * @brief	队列初始化 
+ *
+ * @param pqueue	队列指针
+ * @param size		队列容纳数据项数量	
+ * @return
+ *		@retval 0	成功 
+ *		@retval -10	malloc分配内存失败
+ */
 int squeue_init(squeue_t *pqueue, int size)
 {
 	pqueue->qdata = (squeue_data_t *)calloc(size, sizeof(squeue_data_t));
@@ -23,7 +32,7 @@ int squeue_init(squeue_t *pqueue, int size)
 	{
 		pqueue->qdata = NULL;
 		_qprintf("queue init fail!\n");
-		return -1;
+		return -10;
 	}
 	pqueue->head = 0;
 	pqueue->tail = 0;
@@ -45,6 +54,17 @@ void squeue_data_destroy(void *data)
 	}
 }
 
+/**
+ * @brief  入队扩展函数，带malloc分配数据空间拷贝数据
+ *
+ * @param pqueue	队列指针
+ * @param pdata		入队数据指针 
+ * @param length	入队数据长度	
+ * @return
+ *		@retval 0	成功 
+ *		@retval	-1	队列满不能再增加数据 
+ *		@retval -10	malloc分配内存失败
+ */
 int squeue_enqueue_ext(squeue_t *pqueue, void *pdata, unsigned int length)
 {
 	squeue_data_t data;
@@ -54,7 +74,7 @@ int squeue_enqueue_ext(squeue_t *pqueue, void *pdata, unsigned int length)
 	if (data.pdata == NULL)
 	{
 		_qprintf("Warn: malloc error");
-		return -1;
+		return -10;
 	}
 	memcpy(data.pdata, pdata, sizeof(length));
 
