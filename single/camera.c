@@ -80,7 +80,7 @@ int camera_init(char *devpath, unsigned int *width, unsigned int *height, unsign
 			(fmt1.pixelformat >> 24) & 0xFF, fmt1.description);
     }
 
-#if 0
+#if 1
 	struct v4l2_streamparm streamparam;
 	/* 获取视频流信息 */
 	memset(&streamparam, 0, sizeof(struct v4l2_streamparm));

@@ -40,7 +40,7 @@ camera_state_t gcamera_state = CAMERA_STATE_CLOSE;
 squeue_t gqueue;
 unsigned char gframe_rgb24[PWIDTH * PHEIGHT *3];
 unsigned char gframe_bmp[54 + PWIDTH * PHEIGHT *3];
-unsigned int gis_mjpeg = 1; // set mjpeg format
+unsigned int gis_mjpeg = 0; // set mjpeg format
 unsigned int gwidth = PWIDTH;
 unsigned int gheight = PHEIGHT;
 unsigned int gframe_size = 0;
@@ -142,6 +142,7 @@ void * process_frame_thread(void *arg)
 		}
 */
 //        pthread_mutex_lock(&mutex);
+//		sem_wait(&sem);
 		ret = sem_trywait(&sem);
 		if((ret < 0) && (errno == EAGAIN))
 		{
@@ -149,6 +150,7 @@ void * process_frame_thread(void *arg)
 			usleep(10000);
 			continue;
 		}
+
 		ret = squeue_dequeue(&gqueue, &sdata);
 		if (ret < 0)
 		{
