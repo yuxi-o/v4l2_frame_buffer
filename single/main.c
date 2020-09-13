@@ -32,7 +32,6 @@ typedef enum {
 	CAMERA_STATE_ERR
 } camera_state_t;
 
-pthread_mutex_t mutex;
 sem_t sem;
 
 int gcamera_fd;
@@ -61,15 +60,7 @@ void* get_frame_thread(void *arg)
         printf("camera start failed!\n");
         exit(-1);
 	}
-/*
-	FILE *fp = fopen("./1.yuv", "wb");
-	if(!fp)
-	{
-		printf("fopen file 1.yuv error!\n");
-		return (void *)-1;
-	}
-*/
-//    while(1)
+
     while(CAMERA_STATE_CAP == gcamera_state)
     {
 /*		if(squeue_is_full(&gqueue))
@@ -86,15 +77,12 @@ void* get_frame_thread(void *arg)
 			perror("Camera dequeue fail");
 			break;
 		}
-//      pthread_mutex_lock(&mutex);
-//      gframe_size = jpegsize;
-//      memcpy(video_p, jpegbuf, jpegsize);
+
 		ret = squeue_enqueue_ext(&gqueue, buf, size);
 		if (ret < 0)
 		{
 			if (ret == -1) // queue overflow
 			{
-//				pthread_mutex_unlock(&mutex);
 				camera_eqbuf(gcamera_fd, gindex);
 				printf("Warn: frame buffer queue is overflow! index:[%d]\n", gindex);
 				usleep(10000);
@@ -107,14 +95,10 @@ void* get_frame_thread(void *arg)
 			}
 		}
 
-//        pthread_mutex_unlock(&mutex);
-//		fwrite(buf, size, 1, fp);
 		sem_post(&sem);
         camera_eqbuf(gcamera_fd, gindex);
     }
 
-//	sync();
-//	fclose(fp);
 	gcamera_state = CAMERA_STATE_ERR;
 	printf("Camera get frame thread stop!\n");
 	return NULL;
@@ -141,7 +125,6 @@ void * process_frame_thread(void *arg)
 			continue;
 		}
 */
-//        pthread_mutex_lock(&mutex);
 //		sem_wait(&sem);
 		ret = sem_trywait(&sem);
 		if((ret < 0) && (errno == EAGAIN))
@@ -158,7 +141,6 @@ void * process_frame_thread(void *arg)
 			usleep(10000);
 			continue;
 		}
-//      pthread_mutex_unlock(&mutex);
 
 		if (gis_mjpeg)
 		{
