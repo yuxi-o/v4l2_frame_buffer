@@ -14,7 +14,6 @@
 #include <linux/videodev2.h>
 #include <signal.h>
 #include <time.h>
-#include <semaphore.h>
 #include "camera.h"
 #include "image_process.h"
 #include "queue.h"
@@ -32,14 +31,12 @@ typedef enum {
 	CAMERA_STATE_ERR
 } camera_state_t;
 
-sem_t sem;
-
 int gcamera_fd;
 camera_state_t gcamera_state = CAMERA_STATE_CLOSE;
 squeue_t gqueue;
 unsigned char gframe_rgb24[PWIDTH * PHEIGHT *3];
 unsigned char gframe_bmp[54 + PWIDTH * PHEIGHT *3];
-unsigned int gis_mjpeg = 0; // set mjpeg format
+unsigned int gis_mjpeg = 1; // set mjpeg format
 unsigned int gwidth = PWIDTH;
 unsigned int gheight = PHEIGHT;
 unsigned int gframe_size = 0;
@@ -84,7 +81,7 @@ void* get_frame_thread(void *arg)
 			if (ret == -1) // queue overflow
 			{
 				camera_eqbuf(gcamera_fd, gindex);
-				printf("Warn: frame buffer queue is overflow! index:[%d]\n", gindex);
+//				printf("Warn: frame buffer queue is overflow! index:[%d]\n", gindex);
 				usleep(10000);
 				continue;
 			}
@@ -95,7 +92,6 @@ void* get_frame_thread(void *arg)
 			}
 		}
 
-		sem_post(&sem);
         camera_eqbuf(gcamera_fd, gindex);
     }
 
@@ -125,19 +121,10 @@ void * process_frame_thread(void *arg)
 			continue;
 		}
 */
-//		sem_wait(&sem);
-		ret = sem_trywait(&sem);
-		if((ret < 0) && (errno == EAGAIN))
-		{
-			printf("Warn: frame buffer queue may be empty, trywait failed\n");
-			usleep(10000);
-			continue;
-		}
-
 		ret = squeue_dequeue(&gqueue, &sdata);
 		if (ret < 0)
 		{
-			printf("Warn: frame buffer queue is empty!\n");
+//			printf("Warn: frame buffer queue is empty!\n");
 			usleep(10000);
 			continue;
 		}
@@ -188,7 +175,6 @@ void signal_int_handle(int signo)
 	printf("Clean resource and exit!\n");
 	gcamera_state = CAMERA_STATE_CLOSE;
 	squeue_destroy(&gqueue, squeue_data_destroy);
-	sem_destroy(&sem);
     camera_stop(gcamera_fd);
     camera_exit(gcamera_fd);
 }
@@ -218,7 +204,6 @@ int main(int argv,char ** argc)
 		perror("init queue failed!\n");
 		exit(-1);
 	}
-	sem_init(&sem, 0, 0);
 
 	// ¿ªÆôÏß³Ì
     if ((0 != pthread_create(&get_frame_td, NULL, get_frame_thread, NULL))

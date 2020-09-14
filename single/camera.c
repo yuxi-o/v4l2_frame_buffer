@@ -80,58 +80,6 @@ int camera_init(char *devpath, unsigned int *width, unsigned int *height, unsign
 			(fmt1.pixelformat >> 24) & 0xFF, fmt1.description);
     }
 
-#if 1
-	struct v4l2_streamparm streamparam;
-	/* 获取视频流信息 */
-	memset(&streamparam, 0, sizeof(struct v4l2_streamparm));
-	streamparam.type = V4L2_BUF_TYPE_VIDEO_CAPTURE; 
-	ret = ioctl(fd, VIDIOC_G_PARM, &streamparam);
-	if(ret) {
-		perror("camera->init: Get stream info failed");
-        close(fd);
-        return -1;
-	}
-
-	printf("Before setting stream params:\n");
-	printf("Capability: %u\n", streamparam.parm.capture.capability);
-	printf("Capturemode: %u\n", streamparam.parm.capture.capturemode);
-	printf("Extendedmode: %u\n", streamparam.parm.capture.extendedmode);
-	printf("Timeperframe denominator: %u\n", streamparam.parm.capture.timeperframe.denominator);
-	printf("Timeperframe numerator: %u\n", streamparam.parm.capture.timeperframe.numerator);
-
-	/* 帧率分母 分子设置 */
-	streamparam.parm.capture.timeperframe.denominator = CONFIG_CAPTURE_FPS;
-	streamparam.parm.capture.timeperframe.numerator = 1;
-
-	if(ioctl(fd, VIDIOC_S_PARM, &streamparam) == -1) {
-		perror("camera->init: set fps failed");
-        close(fd);
-        return -1;
-	}
-
-	/* 获取视频流信息 */
-	streamparam.type = V4L2_BUF_TYPE_VIDEO_CAPTURE; 
-	ret = ioctl(fd, VIDIOC_G_PARM, &streamparam);
-	if(ret) {
-		perror("camera->init: Get stream info failed");
-        close(fd);
-        return -1;
-	}
-	printf("After setting stream params:\n");
-	printf("Capability: %u\n", streamparam.parm.capture.capability);
-	printf("Capturemode: %u\n", streamparam.parm.capture.capturemode);
-	printf("Extendedmode: %u\n", streamparam.parm.capture.extendedmode);
-	printf("Timeperframe denominator: %u\n", streamparam.parm.capture.timeperframe.denominator);
-	printf("Timeperframe numerator: %u\n", streamparam.parm.capture.timeperframe.numerator);
-	/* 设置自动曝光 */
-	struct v4l2_control ctrl;
-	ctrl.id = V4L2_CID_EXPOSURE_ABSOLUTE;
-	ret = ioctl(fd, VIDIOC_G_CTRL, &ctrl);
-	if(ret) {
-		printf("camera->init: set exposure failed!\n");
-	}
-#endif
-
     //设定摄像头捕获格式
 	if (*ismjpeg)
 	{
@@ -191,6 +139,43 @@ get_fmt:
     {
 		printf("camera->init: picture format is yuyu.\n");
     }
+
+#if 1
+	struct v4l2_streamparm streamparam;
+	/* 设置视频流信息 */
+	memset(&streamparam, 0, sizeof(struct v4l2_streamparm));
+	streamparam.type = V4L2_BUF_TYPE_VIDEO_CAPTURE; 
+	/* 帧率分母 分子设置 */
+	streamparam.parm.capture.timeperframe.denominator = CONFIG_CAPTURE_FPS;
+	streamparam.parm.capture.timeperframe.numerator = 1;
+	if(ioctl(fd, VIDIOC_S_PARM, &streamparam) == -1) {
+		perror("camera->init: set fps failed");
+        close(fd);
+        return -1;
+	}
+
+	/* 获取视频流信息 */
+	streamparam.type = V4L2_BUF_TYPE_VIDEO_CAPTURE; 
+	ret = ioctl(fd, VIDIOC_G_PARM, &streamparam);
+	if(ret) {
+		perror("camera->init: Get stream info failed");
+        close(fd);
+        return -1;
+	}
+	printf("After setting stream params:\n");
+	printf("Capability: %u\n", streamparam.parm.capture.capability);
+	printf("Capturemode: %u\n", streamparam.parm.capture.capturemode);
+	printf("Extendedmode: %u\n", streamparam.parm.capture.extendedmode);
+	printf("Timeperframe denominator: %u\n", streamparam.parm.capture.timeperframe.denominator);
+	printf("Timeperframe numerator: %u\n", streamparam.parm.capture.timeperframe.numerator);
+	/* 设置自动曝光 */
+	struct v4l2_control ctrl;
+	ctrl.id = V4L2_CID_EXPOSURE_ABSOLUTE;
+	ret = ioctl(fd, VIDIOC_G_CTRL, &ctrl);
+	if(ret) {
+		printf("camera->init: set exposure failed!\n");
+	}
+#endif
 
     /*给图像数据分配存在于内核的物理内存空间*/
     memset(&reqbufs, 0, sizeof(struct v4l2_requestbuffers));
