@@ -40,11 +40,18 @@ int camera_init(char *devpath, unsigned int *width, unsigned int *height, unsign
 		printf("camera->init: Open %s failed.\n", devpath);
         return -1;
     }
+    /* 设置采集来源 */ // 可省略
+    struct v4l2_input input;
+    input.index = 0;
+    if (ioctl(fd, VIDIOC_S_INPUT, &input)) {
+        printf("camera->init: set input failed.\n");
+    }
 
     /*查询设备属性*/
     ret = ioctl(fd, VIDIOC_QUERYCAP, &capability);
     if (ret == -1) {
         printf("camera->init: querycap failed.\n");
+        close(fd);
         return -1;
     }
 
@@ -69,16 +76,63 @@ int camera_init(char *devpath, unsigned int *width, unsigned int *height, unsign
 
     /*获取当前摄像头所支持的所有视频输出格式*/
     struct v4l2_fmtdesc fmt1;
+	struct v4l2_frmsizeenum fsize;
     memset(&fmt1, 0, sizeof(fmt1));
     fmt1.index = 0;            //初始化为0
     fmt1.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     while ((ret = ioctl(fd, VIDIOC_ENUM_FMT, &fmt1)) == 0)
     {
-        fmt1.index++;
         printf("PixelFormat: pixelformat = '%c%c%c%c', description = '%s' \n",
 			fmt1.pixelformat & 0xFF, (fmt1.pixelformat >> 8) & 0xFF, (fmt1.pixelformat >> 16) & 0xFF, 
 			(fmt1.pixelformat >> 24) & 0xFF, fmt1.description);
-    }
+        fmt1.index++;
+
+		//获取frame sizes
+		fsize.index = 0;
+		fsize.pixel_format = fmt1.pixelformat;
+		while ((ret = ioctl(fd, VIDIOC_ENUM_FRAMESIZES, &fsize)) == 0)
+		{
+			fsize.index++;
+			if (fsize.type == V4L2_FRMSIZE_TYPE_DISCRETE)
+			{
+				printf("    discrete: %ux%u:   ", fsize.discrete.width, fsize.discrete.height);
+				// enumerate frame rates
+				struct v4l2_frmivalenum fival;
+				fival.index = 0;
+				fival.pixel_format = fmt1.pixelformat;
+				fival.width = fsize.discrete.width;
+				fival.height = fsize.discrete.height;
+				while ((ret = ioctl(fd, VIDIOC_ENUM_FRAMEINTERVALS, &fival)) == 0)
+				{
+					fival.index++;
+					if (fival.type == V4L2_FRMIVAL_TYPE_DISCRETE)
+					{
+						printf("%u/%u ", fival.discrete.numerator, fival.discrete.denominator);
+					}
+					else
+						printf("I only handle discrete frame intervals...\n");
+				}
+				printf("\n");
+			}
+			else if (fsize.type == V4L2_FRMSIZE_TYPE_CONTINUOUS)
+			{
+				printf("  continuous: %ux%u to %ux%u\n",
+					fsize.stepwise.min_width, fsize.stepwise.min_height,
+					fsize.stepwise.max_width, fsize.stepwise.max_height);
+			}
+			else if (fsize.type == V4L2_FRMSIZE_TYPE_STEPWISE)
+			{
+				printf("  stepwise: %ux%u to %ux%u step %ux%u\n",
+					fsize.stepwise.min_width,  fsize.stepwise.min_height,
+					fsize.stepwise.max_width,  fsize.stepwise.max_height,
+					fsize.stepwise.step_width, fsize.stepwise.step_height);
+			}
+			else
+			{
+				printf("  fsize.type not supported: %d\n", fsize.type);
+			}
+		}
+	}
 
     //设定摄像头捕获格式
 	if (*ismjpeg)
@@ -141,15 +195,15 @@ get_fmt:
     }
 
 #if 1
-	struct v4l2_streamparm streamparam;
 	/* 设置视频流信息 */
+	struct v4l2_streamparm streamparam;
 	memset(&streamparam, 0, sizeof(struct v4l2_streamparm));
 	streamparam.type = V4L2_BUF_TYPE_VIDEO_CAPTURE; 
 	/* 帧率分母 分子设置 */
 	streamparam.parm.capture.timeperframe.denominator = CONFIG_CAPTURE_FPS;
 	streamparam.parm.capture.timeperframe.numerator = 1;
 	if(ioctl(fd, VIDIOC_S_PARM, &streamparam) == -1) {
-		perror("camera->init: set fps failed");
+		printf("camera->init: set fps failed");
         close(fd);
         return -1;
 	}
@@ -158,7 +212,7 @@ get_fmt:
 	streamparam.type = V4L2_BUF_TYPE_VIDEO_CAPTURE; 
 	ret = ioctl(fd, VIDIOC_G_PARM, &streamparam);
 	if(ret) {
-		perror("camera->init: Get stream info failed");
+		printf("camera->init: Get stream info failed");
         close(fd);
         return -1;
 	}
@@ -168,7 +222,7 @@ get_fmt:
 	printf("Extendedmode: %u\n", streamparam.parm.capture.extendedmode);
 	printf("Timeperframe denominator: %u\n", streamparam.parm.capture.timeperframe.denominator);
 	printf("Timeperframe numerator: %u\n", streamparam.parm.capture.timeperframe.numerator);
-	/* 设置自动曝光 */
+	/* 设置自动曝光 */ // 可省略
 	struct v4l2_control ctrl;
 	ctrl.id = V4L2_CID_EXPOSURE_ABSOLUTE;
 	ret = ioctl(fd, VIDIOC_G_CTRL, &ctrl);
