@@ -16,7 +16,7 @@
 #include <time.h>
 #include "camera.h"
 
-#define REQBUFS_COUNT  10 
+#define REQBUFS_COUNT  5
 #define CONFIG_CAPTURE_FPS 30
 
 struct img {

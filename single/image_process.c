@@ -7,7 +7,12 @@
 #include <errno.h>
 #include <string.h>
 #include <jpeglib.h>
+#include <stdint.h>
+#include <x264.h>
 #include "image_process.h"
+
+#define max(x,y) ((x)>(y)?(x):(y))
+#define min(x,y) ((x)<(y)?(x):(y))
 
 #pragma pack(2)        //设置为2字节对齐
 struct bmp_fileheader
@@ -197,6 +202,64 @@ int jpeg_to_rgb24(unsigned char *rgb24, unsigned char *jpeg, unsigned int *width
     
     jpeg_finish_decompress(&cinfo);
     jpeg_destroy_decompress(&cinfo);
+
+    return 0;
+}
+
+int rgb24_to_yuv420p(unsigned char *yuvBuf, unsigned char *rgb24, unsigned int width, unsigned int height, unsigned int *len)
+{
+    int i, j;
+    unsigned char *bufY, *bufU, *bufV, *bufRGB;
+    memset(yuvBuf,0,(unsigned int )*len);
+    bufY = yuvBuf;
+    bufV = yuvBuf + width * height;
+    bufU = bufV + (width * height* 1/4);
+    *len = 0;
+    unsigned char y, u, v, r, g, b;
+    for (j = 0; j< height;j++)
+    {
+        bufRGB = rgb24 + width * (height - 1 - j) * 3 ;
+        for (i = 0;i<width;i++)
+        {
+            r = *(bufRGB++);
+            g = *(bufRGB++);
+            b = *(bufRGB++);
+            y = (unsigned char)( ( 66 * r + 129 * g +  25 * b + 128) >> 8) + 16  ;
+            u = (unsigned char)( ( -38 * r -  74 * g + 112 * b + 128) >> 8) + 128 ;
+            v = (unsigned char)( ( 112 * r -  94 * g -  18 * b + 128) >> 8) + 128 ;
+            *(bufY++) = max( 0, min(y, 255 ));
+            if (j%2==0&&i%2 ==0)
+            {
+                if (u>255)
+                {
+                    u=255;
+                }
+                if (u<0)
+                {
+                    u = 0;
+                }
+                *(bufU++) =u;
+                //存u分量
+            }
+            else
+            {
+                //存v分量
+                if (i%2==0)
+                {
+                    if (v>255)
+                    {
+                        v = 255;
+                    }
+                    if (v<0)
+                    {
+                        v = 0;
+                    }
+                    *(bufV++) =v;
+                }
+            }
+        }
+    }
+    *len = width * height + (width * height)/2;
 
     return 0;
 }
@@ -403,3 +466,143 @@ int write_fd(const char *path, const char *buf, unsigned int count)
 
 	return total;
 }
+
+/*************************************************
+ * H.264 encoding
+*************************************************/
+
+struct {
+	x264_nal_t * pNals;
+	x264_t *pHandle;
+	x264_picture_t *pPicIn;
+	x264_param_t *pParam;
+} mx264_encoder;
+
+int h264_encode_start(unsigned int width, unsigned int height)
+{
+	mx264_encoder.pPicIn = (x264_picture_t*) malloc(sizeof(x264_picture_t));
+	mx264_encoder.pParam = (x264_param_t*) malloc(sizeof(x264_param_t));
+
+	x264_param_default(mx264_encoder.pParam);
+	x264_param_default_preset(mx264_encoder.pParam, "fast", "zerolatency");
+
+	// 设置参数
+	mx264_encoder.pParam->i_csp = X264_CSP_I422;
+	mx264_encoder.pParam->i_width = width;
+	mx264_encoder.pParam->i_height = height;
+	mx264_encoder.pParam->i_fps_num = 30; //fps
+	mx264_encoder.pParam->i_fps_den = 1;
+	mx264_encoder.pParam->i_threads = X264_SYNC_LOOKAHEAD_AUTO;
+	mx264_encoder.pParam->i_keyint_max = 10;
+	mx264_encoder.pParam->rc.i_bitrate = 1024*10; // rate 10kbps
+	mx264_encoder.pParam->rc.i_rc_method = X264_RC_ABR;
+
+	x264_param_apply_profile(mx264_encoder.pParam, "high422");
+
+	mx264_encoder.pHandle = x264_encoder_open(mx264_encoder.pParam);
+
+	x264_picture_alloc(mx264_encoder.pPicIn, X264_CSP_I422, mx264_encoder.pParam->i_width, mx264_encoder.pParam->i_height);
+
+	return 0;
+}
+
+int h264_encode_stop(void)
+{
+	if(mx264_encoder.pHandle){
+		x264_encoder_close(mx264_encoder.pHandle);
+	}
+
+	if(mx264_encoder.pPicIn){
+		x264_picture_clean(mx264_encoder.pPicIn);
+		free(mx264_encoder.pPicIn);
+		mx264_encoder.pPicIn = NULL;
+	}
+
+	if(mx264_encoder.pParam){
+		free(mx264_encoder.pParam);
+		mx264_encoder.pParam = NULL;
+	}
+
+	return 0;
+}
+
+int h264_encode_frame(const unsigned char *pdata, unsigned int width, unsigned int height, unsigned int length, FILE* fp)
+//int h264_encode_frame(const unsigned char *pdata, unsigned char *pdataOut, unsigned int width, unsigned int height, unsigned int length)
+{
+	x264_picture_t pic_out;
+	int index_y, index_u, index_v;
+	int num;
+	int nNal = -1;
+	int result = 0;
+	int i = 0;
+	static long int pts = 0;
+	unsigned char *y = mx264_encoder.pPicIn->img.plane[0];
+	unsigned char *u = mx264_encoder.pPicIn->img.plane[1];
+	unsigned char *v = mx264_encoder.pPicIn->img.plane[2];
+
+	index_y = 0;
+	index_u = 0;
+	index_v = 0;
+
+	num = width * height * 2 - 4  ;
+	for(i=0; i<num; i=i+4){
+		*(y + (index_y++)) = *(pdata + i);
+		*(u + (index_u++)) = *(pdata + i + 1);
+		*(y + (index_y++)) = *(pdata + i + 2);
+		*(v + (index_v++)) = *(pdata + i + 3);
+	}
+
+	mx264_encoder.pPicIn->i_type = X264_TYPE_AUTO;
+
+	mx264_encoder.pPicIn->i_pts = pts++;
+
+	if (x264_encoder_encode(mx264_encoder.pHandle, &(mx264_encoder.pNals),
+				&nNal, mx264_encoder.pPicIn, &pic_out) < 0) {
+		return -1;
+	}
+
+	for (i = 0; i < nNal; i++) {
+		//memcpy(pdataOut, mx264_encoder.pNals[i].p_payload, mx264_encoder.pNals[i].i_payload);
+		//pdataOut += mx264_encoder.pNals[i].i_payload;
+		fwrite(mx264_encoder.pNals[i].p_payload, 1, mx264_encoder.pNals[i].i_payload, fp);
+		result += mx264_encoder.pNals[i].i_payload;
+	}
+
+	return result;
+}
+
+int h264_encode_frame_420p(const unsigned char *pdata, unsigned int width, unsigned int height, unsigned int length, FILE* fp)
+{
+	x264_picture_t pic_out;
+	int nNal = -1;
+	int result = 0;
+	int i = 0;
+	static long int pts = 0;
+	unsigned char *y = mx264_encoder.pPicIn->img.plane[0];
+	unsigned char *u = mx264_encoder.pPicIn->img.plane[1];
+	unsigned char *v = mx264_encoder.pPicIn->img.plane[2];
+
+	long int size = width*height;
+	memcpy(y, pdata, size);
+	memcpy(u, pdata+size, size/4);
+	memcpy(v, pdata+size*5/4, size/4);
+
+	mx264_encoder.pPicIn->i_type = X264_TYPE_AUTO;
+
+	mx264_encoder.pPicIn->i_pts = pts++;
+
+	if (x264_encoder_encode(mx264_encoder.pHandle, &(mx264_encoder.pNals),
+				&nNal, mx264_encoder.pPicIn, &pic_out) < 0) {
+		return -1;
+	}
+
+	for (i = 0; i < nNal; i++) {
+		//memcpy(pdataOut, mx264_encoder.pNals[i].p_payload, mx264_encoder.pNals[i].i_payload);
+		//pdataOut += mx264_encoder.pNals[i].i_payload;
+		fwrite(mx264_encoder.pNals[i].p_payload, 1, mx264_encoder.pNals[i].i_payload, fp);
+		result += mx264_encoder.pNals[i].i_payload;
+	}
+
+	return result;
+}
+

@@ -1,5 +1,5 @@
 camera: *.c *.h
-	gcc $^ -o $@ -lpthread -ljpeg -g -Wall
+	${CC} $^ -o $@ -lpthread -ljpeg -lx264 -g -Wall
 
 clean:
 	-rm camera

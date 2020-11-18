@@ -18,12 +18,12 @@
 #include "image_process.h"
 #include "queue.h"
 
-#define PWIDTH	1280	
-#define PHEIGHT	720
+#define PWIDTH	640 //800 //1280
+#define PHEIGHT	480 //600 // 720
 
-#define DEVNAME "/dev/video0"
+#define DEVNAME "/dev/video1"
 
-#define CONFIG_FRAME_SIZE	30
+#define CONFIG_FRAME_SIZE	10
 
 typedef enum {
 	CAMERA_STATE_CLOSE,
@@ -35,6 +35,7 @@ int gcamera_fd;
 camera_state_t gcamera_state = CAMERA_STATE_CLOSE;
 squeue_t gqueue;
 unsigned char gframe_rgb24[PWIDTH * PHEIGHT *3];
+unsigned char gframe_yuv[PWIDTH * PHEIGHT *3];
 unsigned char gframe_bmp[54 + PWIDTH * PHEIGHT *3];
 unsigned int gis_mjpeg = 1; // set mjpeg format
 unsigned int gwidth = PWIDTH;
@@ -109,8 +110,17 @@ void * process_frame_thread(void *arg)
     unsigned int height = PHEIGHT;
 	unsigned int bmpsize = 0;
 	int ret = 0;
+	FILE *fp;
 
 	t1 = time(NULL);	
+	sprintf(gbmp_name, "/tmp/%ld.h264", t1);
+	fp = fopen(gbmp_name, "w");
+	if(fp == NULL){
+		printf("Create h264 file failed!\n");
+		exit(-1);
+	}
+
+	h264_encode_start(width, height);
     while(CAMERA_STATE_CAP == gcamera_state)
 //	while(1)
     {
@@ -129,14 +139,20 @@ void * process_frame_thread(void *arg)
 			continue;
 		}
 
+
 		if (gis_mjpeg)
 		{
 			jpeg_to_rgb24(gframe_rgb24, sdata.pdata, &width, &height, sdata.length);
+			unsigned int data_len = sdata.length;
+			rgb24_to_yuv420p(gframe_yuv, gframe_rgb24, width, height, &data_len);
+			h264_encode_frame_420p(gframe_yuv, width, height, data_len, fp);
 		}
 		else 
 		{
-			yuv422_to_rgb24(gframe_rgb24, sdata.pdata, width, height);
+			//yuv422_to_rgb24(gframe_rgb24, sdata.pdata, width, height);
+			h264_encode_frame(sdata.pdata, width, height, sdata.length, fp);
 		}
+#if 0
 		rgb24_to_bmp(gframe_bmp, gframe_rgb24, width, height, gis_mjpeg, &bmpsize);
 		sprintf(gbmp_name, "%d.bmp", gframe_count);
 		ret = write_file(gbmp_name, gframe_bmp, bmpsize);
@@ -146,6 +162,7 @@ void * process_frame_thread(void *arg)
 			printf("%s, %d, %s\n", __FUNCTION__, __LINE__, __FILE__);
 			exit(-1);
 		}
+#endif
 
 // 统计帧处理速度
 #if 1 
@@ -155,6 +172,7 @@ void * process_frame_thread(void *arg)
 			printf("camera data (mjpeg: %d) is %d bytes, width is %d, height is %d\n", gis_mjpeg, sdata.length, width, height);
 			printf("100 frame (%u) diff timestamp: %ld\n", gframe_count, t2-t1);
 			gframe_count=0;
+			break;
 		}
 #endif
 		squeue_data_destroy((void *)&sdata);
@@ -162,6 +180,10 @@ void * process_frame_thread(void *arg)
 
 	gcamera_state = CAMERA_STATE_ERR;
 	printf("Camera process frame thread stop!\n");
+
+	h264_encode_stop();
+	fflush(fp);
+	fclose(fp);
 	return NULL;
 }
 
