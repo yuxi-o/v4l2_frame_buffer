@@ -17,11 +17,13 @@
 #include "camera.h"
 #include "image_process.h"
 #include "queue.h"
+#include "avilib.h"
 
 #define PWIDTH	1280	
 #define PHEIGHT	720
 
 #define DEVNAME "/dev/video0"
+#define AVIFILE "/tmp/test.avi"
 
 #define CONFIG_FRAME_SIZE	30
 
@@ -110,6 +112,17 @@ void * process_frame_thread(void *arg)
 	unsigned int bmpsize = 0;
 	int ret = 0;
 
+	avi_t *avifd = AVI_open_output_file(AVIFILE);
+	if(avifd == NULL){
+		perror("Fail to open AVI");
+		exit(EXIT_FAILURE);
+	}
+	if (gis_mjpeg){
+		AVI_set_video(avifd, PWIDTH, PHEIGHT, 30, "MJPG");
+	} else {
+		AVI_set_video(avifd, PWIDTH, PHEIGHT, 30, "YUYV422");
+	}
+
 	t1 = time(NULL);	
     while(CAMERA_STATE_CAP == gcamera_state)
 //	while(1)
@@ -129,6 +142,13 @@ void * process_frame_thread(void *arg)
 			continue;
 		}
 
+		ret = AVI_write_frame(avifd, sdata.pdata, sdata.length, 0);
+		if(ret < 0)
+		{
+			printf("Warn: AVI_write_frame error\n");
+			continue;
+		}
+#if 0
 		if (gis_mjpeg)
 		{
 			jpeg_to_rgb24(gframe_rgb24, sdata.pdata, &width, &height, sdata.length);
@@ -146,6 +166,7 @@ void * process_frame_thread(void *arg)
 			printf("%s, %d, %s\n", __FUNCTION__, __LINE__, __FILE__);
 			exit(-1);
 		}
+#endif
 
 // 统计帧处理速度
 #if 1 
@@ -162,6 +183,8 @@ void * process_frame_thread(void *arg)
 
 	gcamera_state = CAMERA_STATE_ERR;
 	printf("Camera process frame thread stop!\n");
+
+	AVI_close(avifd);
 	return NULL;
 }
 
