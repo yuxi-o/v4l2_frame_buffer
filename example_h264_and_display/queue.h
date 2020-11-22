@@ -1,0 +1,29 @@
+/* queue.h */
+#ifndef __QUEUE_H__
+#define __QUEUE_H__
+
+#include <stdint.h>
+#include <pthread.h>
+
+typedef struct QueueData
+{
+	void* pData;
+	uint32_t Length;
+} sQueueData;
+
+typedef struct
+{
+	sQueueData Data[CONFIG_QUEUE_SIZE];
+	int HeadIndex;
+	int TailIndex;
+	pthread_mutex_t QueueMutex;
+} sQueue;
+
+int QueueInit(sQueue* pQueuePrivateData);
+int QueuePutData(sQueueData* pData);
+// int QueuePushBack(sQueue* pQueuePrivateData, sQueueData* pData);
+int QueuePopData(sQueue* pQueuePrivateData, sQueueData* pData);
+int QueueCallback(sQueueData* pQueueData);
+
+#endif
+
