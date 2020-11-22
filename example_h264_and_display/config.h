@@ -10,7 +10,7 @@
 
 #define CONFIG_DEVNAME_LEN			32
 #define CONFIG_IOCTL_RETRY			5
-#define CONFIG_CAPTURE_DEVICE		"/dev/video0"
+#define CONFIG_CAPTURE_DEVICE		"/dev/video1"
 #define CONFIG_DISPLAY_DEV			"/dev/fb0"
 
 #define CONFIG_QUEUE_SIZE			50

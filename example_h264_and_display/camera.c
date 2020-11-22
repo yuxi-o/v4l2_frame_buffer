@@ -11,6 +11,7 @@
 #include <assert.h>
 #include <linux/videodev2.h>
 #include <pthread.h>
+#include <time.h>
 
 #include "config.h"
 #include "camera.h"
@@ -462,11 +463,14 @@ int CameraCaptureCallbackSet(vCameraFrameProcess pCallback)
 static void* CameraCaptureThread(void* pParam)
 {
 	int Ret = -1;
+	int frameNum = 0;
+	time_t tStart, tEnd;
 	
 	struct v4l2_buffer EnQueueBuf;
 	struct v4l2_buffer DeQueueBuf;
 
 	printf("Start capture\n");
+	tStart = time(NULL);
 
 	while(sCameraPrivateData.State == CAMERA_SATTE_CAP) {
 
@@ -495,6 +499,13 @@ static void* CameraCaptureThread(void* pParam)
 		if(ioctl(sCameraPrivateData.DevFd , VIDIOC_QBUF , &EnQueueBuf)) {
 			perror("Enqueue fail");
 			break;
+		}
+
+		frameNum++;
+		if(frameNum > 100){
+			tEnd = time(NULL);
+			printf("%lds Get 100 frames: width: %d, height: %d\n", tEnd - tStart, sCameraPrivateData.Width, sCameraPrivateData.Height);
+			frameNum = 0;
 		}
 	}
 
