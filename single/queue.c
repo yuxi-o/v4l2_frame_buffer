@@ -67,20 +67,21 @@ void squeue_data_destroy(void *data)
  */
 int squeue_enqueue_ext(squeue_t *pqueue, void *pdata, unsigned int length)
 {
-	squeue_data_t data;
-
-	data.length = length;
-	data.pdata = (unsigned char *)malloc(length);
-	if (data.pdata == NULL)
-	{
-		_qprintf("Warn: malloc error");
-		return -10;
-	}
-	memcpy(data.pdata, pdata, length);
-
 	pthread_mutex_lock(&pqueue->mutex);
 	if(pqueue->count < pqueue->size)
 	{
+		squeue_data_t data;
+
+		data.length = length;
+		data.pdata = (unsigned char *)malloc(length);
+		if (data.pdata == NULL)
+		{
+			pthread_mutex_unlock(&pqueue->mutex);
+			_qprintf("Warn: malloc error");
+			return -10;
+		}
+		memcpy(data.pdata, pdata, length);
+
 		memcpy(&pqueue->qdata[pqueue->tail], &data, sizeof(squeue_data_t));
 		pqueue->tail = (pqueue->tail+1) % pqueue->size;
 		pqueue->count++;
@@ -89,8 +90,8 @@ int squeue_enqueue_ext(squeue_t *pqueue, void *pdata, unsigned int length)
 	}
 	else 
 	{
-		_qprintf("Warn: queue is full\n");
 		pthread_mutex_unlock(&pqueue->mutex);
+		_qprintf("Warn: queue is full\n");
 		return -1;
 	}
 }

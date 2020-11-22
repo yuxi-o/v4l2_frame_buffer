@@ -19,8 +19,8 @@
 #include "queue.h"
 #include "avilib.h"
 
-#define PWIDTH	1280	
-#define PHEIGHT	720
+#define PWIDTH	640 //1280	
+#define PHEIGHT	480 //720
 
 #define DEVNAME "/dev/video0"
 #define AVIFILE "/tmp/test.avi"
@@ -173,8 +173,7 @@ void * process_frame_thread(void *arg)
 		gframe_count++;
 		if (gframe_count > 100 ){
 			t2 = time(NULL);	
-			printf("camera data (mjpeg: %d) is %d bytes, width is %d, height is %d\n", gis_mjpeg, sdata.length, width, height);
-			printf("100 frame (%u) diff timestamp: %ld\n", gframe_count, t2-t1);
+			printf("[%lds] get %d frames (mjpeg: %d): %d bytes, width is %d, height is %d\n", t2-t1, gframe_count, gis_mjpeg, sdata.length, width, height);
 			gframe_count=0;
 		}
 #endif
