@@ -22,10 +22,12 @@
 #define PWIDTH	640 //1280	
 #define PHEIGHT	480 //720
 
-#define DEVNAME "/dev/video0"
-#define AVIFILE "/tmp/test.avi"
+#define DEVNAME "/dev/video1"
+#define AVIFILE_PREFIX "wb"
 
 #define CONFIG_FRAME_SIZE	30
+//#define CONFIG_SAVE_INTERVAL_SECOND	300
+#define CONFIG_SAVE_INTERVAL_SECOND	60
 
 typedef enum {
 	CAMERA_STATE_CLOSE,
@@ -102,20 +104,24 @@ void* get_frame_thread(void *arg)
 	return NULL;
 }
 
-void * process_frame_thread(void *arg)
+static avi_t *get_avi(time_t *t)
 {
-	char gbmp_name[32];
-	squeue_data_t sdata;
-	time_t t1, t2;
-    unsigned int width = PWIDTH;
-    unsigned int height = PHEIGHT;
-	unsigned int bmpsize = 0;
-	int ret = 0;
+	struct tm *local;
+	avi_t *avifd = NULL;
+	char buf[64];
 
-	avi_t *avifd = AVI_open_output_file(AVIFILE);
+	local = localtime(t);
+	if(local == NULL){
+		return NULL;
+	}
+
+	snprintf(buf, sizeof(buf), "%s%4d%02d%02d_%02d%02d%02d.avi", AVIFILE_PREFIX,
+			local->tm_year + 1900, local->tm_mon+1, local->tm_mday,
+			local->tm_hour, local->tm_min, local->tm_sec);
+	avifd = AVI_open_output_file(buf);
 	if(avifd == NULL){
 		perror("Fail to open AVI");
-		exit(EXIT_FAILURE);
+		return NULL;
 	}
 	if (gis_mjpeg){
 		AVI_set_video(avifd, PWIDTH, PHEIGHT, 30, "MJPG");
@@ -123,10 +129,30 @@ void * process_frame_thread(void *arg)
 		AVI_set_video(avifd, PWIDTH, PHEIGHT, 30, "YUYV422");
 	}
 
-	t1 = time(NULL);	
+	return avifd;
+}
+
+void * process_frame_thread(void *arg)
+{
+	char gbmp_name[32];
+	squeue_data_t sdata;
+	time_t t1, t2, t3;
+    unsigned int width = PWIDTH;
+    unsigned int height = PHEIGHT;
+	unsigned int bmpsize = 0;
+	int ret = 0;
+	avi_t *avifd ;
+
+	t1 = t2 = time(NULL);
+	avifd = get_avi(&t1);
+	if(avifd == NULL){
+		return NULL;
+	}
+
     while(CAMERA_STATE_CAP == gcamera_state)
 //	while(1)
     {
+
 /*		if(squeue_is_empty(&gqueue))
 		{
 			printf("Warn: frame buffer queue is empty!\n");
@@ -168,15 +194,22 @@ void * process_frame_thread(void *arg)
 		}
 #endif
 
-// 统计帧处理速度
-#if 1 
+		// 统计帧处理速度
 		gframe_count++;
-		if (gframe_count > 100 ){
-			t2 = time(NULL);	
-			printf("[%lds] get %d frames (mjpeg: %d): %d bytes, width is %d, height is %d\n", t2-t1, gframe_count, gis_mjpeg, sdata.length, width, height);
+		if (gframe_count > 100){
+			t3 = time(NULL);
+			printf("[%lds] get %d frames (mjpeg: %d): %d bytes, width is %d, height is %d\n", t3-t1, gframe_count, gis_mjpeg, sdata.length, width, height);
 			gframe_count=0;
+			if((t3 - t2)> CONFIG_SAVE_INTERVAL_SECOND){
+				AVI_close(avifd);
+				avifd = get_avi(&t3);
+				if(avifd == NULL){
+					return NULL;
+				}
+				t2 = t3;
+			}
 		}
-#endif
+
 		squeue_data_destroy((void *)&sdata);
     }
 
